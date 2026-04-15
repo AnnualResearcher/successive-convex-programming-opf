@@ -56,13 +56,14 @@ def nr_validate(net, buses: Iterable[int]):
 
 
 def voltage_deviation_pct(V_method, V_nr, buses: Iterable[int]) -> float:
-    """Average per-bus |V| deviation between method and NR, in percent."""
+    """Average per-bus magnitude deviation ||V_method| - |V_nr|| / |V_nr|, in percent."""
     if not V_method or not V_nr:
         return float("nan")
     err = 0.0
     n = 0
     for bus in buses:
         if bus in V_method and bus in V_nr:
-            err += abs(V_nr[bus] - V_method[bus]) / abs(V_nr[bus]) * 100.0
+            num = abs(abs(V_method[bus]) - abs(V_nr[bus]))
+            err += num / max(abs(V_nr[bus]), 1e-9) * 100.0
             n += 1
     return err / n if n else float("nan")

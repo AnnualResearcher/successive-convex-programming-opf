@@ -4,7 +4,7 @@
 #%%
 import sys; sys.path.insert(0, '.')
 import os
-
+os.chdir(r'c:\Users\user\SNUPSL Dropbox\tmdcks943@snu.ac.kr\5. Codes\7. optimizations\6. Iterative Something')
 os.environ['PATH'] = r'C:\Users\user\AppData\Local\idaes\bin' + os.pathsep + os.environ.get('PATH', '')
 import warnings; warnings.filterwarnings('ignore')
 import pandapower as pp
@@ -105,14 +105,23 @@ def _nr_validate(net, Buses):
 
 
 def _compute_delta_v(V_method, V_nr, Buses):
-    """Average per-bus voltage deviation (%) between method and NR."""
+    """Average per-bus *magnitude* deviation (%) between method and NR.
+
+    Many baselines (DOPF, LM-OPF, SDP via W diagonals, SOCP via DistFlow v)
+    natively recover voltage magnitudes only, not angles. Comparing magnitudes
+    yields a fair modeling-fidelity metric across methods.
+    """
     if not V_method or not V_nr:
         return float('nan')
-    err = 0
+    err = 0.0
+    n = 0
     for bus in Buses:
         if bus in V_method and bus in V_nr:
-            err += abs(V_nr[bus] - V_method[bus]) / abs(V_nr[bus]) * 100
-    return err / len(Buses)
+            num = abs(abs(V_method[bus]) - abs(V_nr[bus]))
+            denom = max(abs(V_nr[bus]), 1e-9)
+            err += num / denom * 100.0
+            n += 1
+    return err / n if n else float('nan')
 
 
 def _result(loss_mw, est_mw, delta_v, runtime, status):
@@ -205,7 +214,35 @@ def measure_socp(name, vm_pu=1.0):
                        f'grb:{model.status}')
 
     est_loss = float(model.ObjVal) * Sbase / 1e6
-    V_method = {b: complex((v[b].X)**0.5, 0) for b in Buses}
+
+    # Reconstruct complex voltages: magnitudes from v[b] = |V_b|^2,
+    # angles by forward sweep from the slack using Ohm's law V_j = V_i - z I_ij
+    # with I_ij = (P_ij - j Q_ij) / conj(V_i).
+    V_method = {}
+    for b in SubBuses:
+        V_method[b] = complex(vm_pu, 0)
+    # Radial → single spanning tree; walk from slack outward
+    visited = set(SubBuses)
+    queue = list(SubBuses)
+    while queue:
+        i = queue.pop(0)
+        for c in Childs[i]:
+            if c in visited:
+                continue
+            l = (i, c)
+            Vi = V_method[i]
+            if abs(Vi) < 1e-9:
+                V_method[c] = complex((v[c].X)**0.5, 0)
+            else:
+                I_ij = complex(Pf[l].X, -Qf[l].X) / Vi.conjugate()
+                z = complex(R[l], X[l])
+                V_method[c] = Vi - z * I_ij
+            visited.add(c)
+            queue.append(c)
+    # Any buses not in the forward sweep (disconnected?): fall back to |V|+0j
+    for b in Buses:
+        if b not in V_method:
+            V_method[b] = complex((v[b].X)**0.5, 0)
 
     # Apply Q dispatch for NR validation
     for idx in net.sgen.index:
