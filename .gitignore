@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+build/
+dist/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Solver / runtime artifacts
+gurobi.log
+*.lp
+*.mps
+*.sol
+*.prm
+
+# Cache (regenerates at runtime)
+src/scp_opf_bench/_legacy/networkdata/initialize/*.pkl
+
+# Local outputs
+/tmp/
+*.tmp
+*.bak
+.env

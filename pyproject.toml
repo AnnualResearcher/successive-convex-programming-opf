@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scp-opf-bench"
+version = "0.1.0"
+description = "Benchmark suite for the contraction-certified SCP-OPF paper"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Seungchan Jo"},
+    {name = "Jae-Young Oh"},
+    {name = "Gyu-Sub Lee"},
+]
+dependencies = [
+    "pandapower>=3.0",
+    "numpy>=1.21",
+    "scipy>=1.7",
+    "pandas>=1.3",
+    "gurobipy>=11.0",
+    "cvxpy>=1.4",
+    "Mosek>=10.0",
+    "pyomo>=6.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
+
+[project.scripts]
+scp-opf-bench = "scp_opf_bench.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"scp_opf_bench._legacy" = ["IEEE123Node/**"]
