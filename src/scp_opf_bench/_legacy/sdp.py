@@ -192,6 +192,10 @@ def sdp_opf(
 
     status = prob.status
     optval = prob.value
+    try:
+        solver_time = float(prob.solver_stats.solve_time)
+    except Exception:
+        solver_time = float('nan')
 
     # Extract numbers
     P_inj_val = np.array([p.value if hasattr(p, "value") else None for p in P_inj], dtype=float)
@@ -222,6 +226,7 @@ def sdp_opf(
     Vmag_hat = np.abs(V_hat)
 
     return {
+        "solver_time": solver_time,
         "status": status,
         "objective": optval,
         "W": W_val,

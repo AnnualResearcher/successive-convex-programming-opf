@@ -207,7 +207,7 @@ def measure_socp(name, vm_pu=1.0):
     model.setObjective(gp.quicksum(R[l] * ell[l] for l in UnidirectionalLines),
                        GRB.MINIMIZE)
     model.optimize()
-    rt = time.perf_counter() - t0
+    rt = float(getattr(model, 'Runtime', time.perf_counter() - t0))
 
     if model.status != GRB.OPTIMAL:
         return _result(float('nan'), float('nan'), float('nan'), rt,
@@ -317,7 +317,9 @@ def measure_sdp(name, vm_pu=1.0):
         res = sdp_opf(Y, Pd, Qd, gen_buses, Pmin, Pmax, Qmin, Qmax,
                       Vmin, Vmax, solver="MOSEK", verbose=False,
                       slack_buses=slack_buses_idx, slack_vm=vm_pu)
-        rt = time.perf_counter() - t0
+        solver_time = float(res.get('solver_time', float('nan')))
+        rt = solver_time if (solver_time == solver_time and solver_time > 0) \
+            else (time.perf_counter() - t0)
 
         if res['status'] in ('optimal', 'optimal_inaccurate'):
             # Relaxed SDP objective: sum(P_inj) from W (may be non-physical).
@@ -543,7 +545,7 @@ def measure_lm(name, vm_pu=1.0):
     model.setObjective(obj, GRB.MINIMIZE)
 
     model.optimize()
-    rt = time.perf_counter() - t0
+    rt = float(getattr(model, 'Runtime', time.perf_counter() - t0))
 
     if model.status == GRB.OPTIMAL:
         est_loss = model.ObjVal * Sbase / 1e6
@@ -650,7 +652,14 @@ def measure_nlp(name, vm_pu=1.0):
     t0 = time.perf_counter()
     try:
         results = solver.solve(m, tee=False)
-        rt = time.perf_counter() - t0
+        # Prefer IPOPT's reported solver wall_time (algorithm time) when available;
+        # fall back to Python-level wall-clock if pyomo doesn't expose it.
+        solver_time = None
+        try:
+            solver_time = float(results.solver.time)
+        except Exception:
+            solver_time = None
+        rt = solver_time if (solver_time is not None and solver_time > 0) else (time.perf_counter() - t0)
         tc = str(results.solver.termination_condition)
         if tc in ('optimal', 'feasible'):
             # Obj.Est: Pg_slack = net deficit + losses, so losses = Pg_slack + sum(P)
@@ -774,8 +783,9 @@ def measure_dcopf(name, vm_pu=1.0):
                                    vm_pu * math.sin(theta[b].X))
                         for b in Buses}
 
+    p_stage_runtime = float(getattr(model, 'Runtime', 0.0))
     if status_p != GRB.OPTIMAL:
-        rt = time.perf_counter() - t0
+        rt = p_stage_runtime
         return _result(float('nan'), float('nan'), float('nan'), rt, 'P-LP_fail')
 
     est_loss_p = sum(R[l] * Pf_star[l]**2 for l in UnidirectionalLines) * Sbase / 1e6
@@ -821,7 +831,7 @@ def measure_dcopf(name, vm_pu=1.0):
         obj.add(R[l] * Qf[l] * Qf[l])
     qmodel.setObjective(obj, GRB.MINIMIZE)
     qmodel.optimize()
-    rt = time.perf_counter() - t0
+    rt = p_stage_runtime + float(getattr(qmodel, 'Runtime', 0.0))
 
     if qmodel.status == GRB.OPTIMAL:
         est_loss = float(qmodel.ObjVal) * Sbase / 1e6
@@ -858,12 +868,14 @@ def measure_scp(name, eta, vm_pu=1.0):
     # Network-size-adaptive convergence tuning.
     # For stressed meshed systems (ieee1888), eta=1 needs warm-starting from eta=0
     # solution and heavier proximal damping to stabilize the aggressive Jacobian step.
+    warm_runtime = 0.0  # solver time spent on the eta=0 warm-start (ieee1888 only)
     if name == 'ieee1888':
         if eta >= 0.5:
             # Two-phase: first warm-start with eta=0, then ramp to target eta
             try:
                 r0 = solve_scp_oltc(net, max_iter=30, eta=0.0,
                                     with_oltc=False, rho=0.01, tol=1e-5)
+                warm_runtime = float(r0.get('runtime_total', 0.0))
                 # Freeze Q dispatch from eta=0 solution, continue with damped eta=1
                 r = solve_scp_oltc(net, max_iter=30, eta=eta, with_oltc=False,
                                    rho=2.0, tol=1e-4, damping=0.5)
@@ -879,7 +891,9 @@ def measure_scp(name, eta, vm_pu=1.0):
         r = solve_scp_oltc(net, max_iter=50, eta=eta, with_oltc=False, rho=0.01, tol=1e-5)
     else:
         r = solve_scp_oltc(net, max_iter=20, eta=eta, with_oltc=False, rho=0.05, tol=1e-4)
-    rt = time.perf_counter() - t0
+    # Use Gurobi's summed solver time (model.Runtime across iterations) instead of
+    # wall-clock; this isolates the algorithm cost from Python model-construction overhead.
+    rt = float(r.get('runtime_total', 0.0)) + warm_runtime
     nr_ok = r.get('nr_converged', False)
     loss = r.get('nr_loss_mw', float('nan'))
     est_loss = r.get('obj', float('nan'))  # per-unit obj from Gurobi
