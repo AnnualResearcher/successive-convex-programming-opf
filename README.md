@@ -1,26 +1,28 @@
-# SCP-OPF Benchmark
+# Successive Convex Programming for Loss-Minimizing OPF
 
 Reference implementation and benchmark suite for the paper
 
 > *A Successive Linear/Convex Programming Framework under a Voltage–Current
 > Representation for Loss-Minimizing Optimal Power Flow*
-> (submitted, *International Journal of Electrical Power & Energy Systems*,
-> 2026, manuscript IJEPES-D-26-00259).
+> — Seungchan Jo, Jae-Young Oh, and Gyu-Sub Lee
+> (*International Journal of Electrical Power & Energy Systems*, 2026,
+> manuscript IJEPES-D-26-00259).
 
 Compares the proposed contraction-certified Successive Convex Programming
-(SCP) against six established OPF baselines on six standard IEEE /
+(SCP) against five established OPF baselines on six standard IEEE /
 pandapower test systems.
 
 ## Methods
 
-| Method   | Solver              | Stage 1 / Stage 2 | Notes |
-|----------|---------------------|-------------------|-------|
-| **DOPF** | Gurobi (LP + QP)    | LP(P) → QP(Q\|P*) | Decoupled optimal power flow (active LP then reactive QP at fixed active flows) |
-| **SOCP** | Gurobi (QCQP)       | Farivar–Low DistFlow | Radial only; exact relaxation under loss-min |
-| **SDP**  | CVXPY + MOSEK       | BIM with `W ≽ 0`  | Limited to networks with ≤ 200 buses |
-| **LM-OPF** | Gurobi (QP)       | Linear BFM + cycle recovery | Wang, Shrestha, Dubey (2024/2025) |
-| **NLP**  | Pyomo + IPOPT       | Full rectangular AC | |
-| **SCP**  | Gurobi (LP / QP)    | Proposed iterative scheme | η ∈ {0, 1} (Picard / full sensitivity) |
+| Method | Solver | Formulation | Notes |
+|--------|--------|-------------|-------|
+| **Lin-DistFlow** | Gurobi (LP + QP) | Simplified DistFlow LP(P) → QP(Q\|P*) | Radial only; decoupled active LP then reactive QP |
+| **DOPF** | Gurobi (LP + QP) | B-θ LP(P) → QP(Q\|P*) | Meshed only; decoupled active LP then reactive QP |
+| **SOCP** | Gurobi (QCQP) | Farivar–Low DistFlow | Radial only; exact relaxation under loss-min |
+| **SDP** | CVXPY + MOSEK | BIM with `W ≽ 0` | Limited to networks with ≤ 200 buses |
+| **LM-OPF** | Gurobi (QP) | Linear BFM + cycle recovery | Wang, Shrestha, Dubey (2026, IEEE TSG early access) |
+| **NLP** | Pyomo + IPOPT | Full rectangular AC | |
+| **SCP** | Gurobi (LP / QP) | Proposed iterative scheme | η ∈ {0, 1} (Picard / full sensitivity) |
 
 ### Mathematical formulations
 
@@ -35,11 +37,11 @@ Let
 - `Q_g^s`                     : controllable reactive dispatch at sgen s (pu)
 - `q_lim^s = √(sn_s² − p_s²)` : reactive capability
 
-#### 1. DOPF — Decoupled OPF
+#### 1. Lin-DistFlow / DOPF — Decoupled OPF
 
 **Stage 1 (active LP).**
 
-- Radial (Simplified DistFlow):
+- Radial (Simplified DistFlow — referred to as **Lin-DistFlow**):
 
   ```
   min   Σ R_ij f_ij²
@@ -48,7 +50,7 @@ Let
         V_slack = V*_slack
   ```
 
-- Meshed (B–θ):
+- Meshed (B–θ — referred to as **DOPF**):
 
   ```
   min   Σ R_ij f_ij²
@@ -97,7 +99,7 @@ rank-1 is not guaranteed, so the reported "Est." for SDP is the NR-
 validated loss at the SDP-recovered operating point (the raw relaxed
 objective is a lower bound, not a physical loss).
 
-#### 4. LM-OPF (Wang et al. 2024/2025) — meshed linearized BFM
+#### 4. LM-OPF (Wang et al. 2026) — meshed linearized BFM
 
 ```
 min   Σ R_ij (P_ij² + Q_ij²)
@@ -140,22 +142,39 @@ Update Ṽ^(k+1) ← V*;  iterate until ‖ΔṼ‖ < tol.
 
 ## Test systems
 
-| Network     | Buses | Type    | V_slack | Load scaling                              |
-|-------------|-------|---------|---------|-------------------------------------------|
-| IEEE 33     | 33    | Radial  | 1.00    | 100%                                      |
-| IEEE 123    | 126   | Radial  | 1.00    | 100%                                      |
-| IEEE 8500   | 4,876 | Radial  | 1.00    | 100%                                      |
-| IEEE 14     | 14    | Meshed  | 1.06    | 100%                                      |
-| IEEE 118    | 118   | Meshed  | 1.035   | 50% (qdispatch feasibility)               |
-| French 1888 | 1,888 | Meshed  | 1.00    | 30% (qdispatch feasibility)               |
+| Network | Buses | Branches | Loads | Sgens | Total P_d | Type | V_slack | Load scaling | Q cap/sgen |
+|---------|-------|----------|-------|-------|-----------|------|---------|--------------|------------|
+| IEEE 33 | 33 | 32 | 32 | 4 | 3.16 MW | Radial | 1.00 pu | 100% | — |
+| IEEE 123 | 126 | 120 | 85 | 16 | 3.49 MW | Radial | 1.00 pu | 100% | — |
+| IEEE 8500 | 4,876 | 4,875 | 1,177 | 1,213 | 16.16 MW | Radial | 1.00 pu | 100% | — |
+| IEEE 14 | 14 | 20 | 11 | 4 | 259 MW | Meshed | 1.06 pu | 100% | ±30 MVAR |
+| IEEE 118 | 118 | 179 | 99 | 53 | 2,121 MW | Meshed | 1.035 pu | 50% | ±30 MVAR |
+| French 1888 | 1,888 | 2,308 | 943 | 271 | 17,882 MW | Meshed | 1.00 pu | 30% | ±30 MVAR |
 
-Per-sgen reactive capability is capped at ±30 MVAR for meshed cases to match
-realistic distributed-inverter ratings.
+### Data sources
+
+All networks are constructed from standard pandapower 3.0 test cases:
+
+- **IEEE 33**: `pandapower.networks.case33bw()` — 12.66 kV radial distribution feeder (Baran & Wu, 1989)
+- **IEEE 123**: reconstructed from IEEE PES Test Feeder data (`IEEE123Node/`) — 4.16 kV three-phase feeder reduced to balanced single-phase equivalent
+- **IEEE 8500**: pandapower `case_ieee8500()` — 7.2 kV large radial feeder (balanced reduction), cached as `ieee8500.p` since the native constructor requires OpenDSS/comtypes
+- **IEEE 14**: `pandapower.networks.case14()` — 5-generator meshed transmission system
+- **IEEE 118**: `pandapower.networks.case118()` — 118-bus transmission system; loads scaled to 50% of nominal to maintain NR feasibility after PV→PQ bus conversion
+- **French 1888**: `pandapower.networks.case1888rte()` — French transmission grid (RTE); loads scaled to 30% of nominal for the same PV→PQ feasibility reason
+
+### Preprocessing
+
+- Originally unbalanced feeders are reduced to balanced single-phase equivalents
+- Distributed generators (sgens) are placed at buses selected by each network's factory function
+- Line shunt capacitances and transformer magnetizing branches are set to zero
+- Bus voltage limits: [0.9, 1.1] pu throughout
+- For meshed cases (IEEE 14/118, French 1888): each sgen's apparent-power rating is set to `sn = √(p² + 30²)` MVA, bounding reactive capability to ±30 MVAR per unit. This matches realistic distributed-inverter ratings and is applied uniformly to all baselines
+- IEEE-118 and French-1888 loads are scaled because the qdispatch conversion (PV→PQ) removes generator voltage regulation; the native loadings require PV-bus reactive control that the PQ-bus benchmark removes by construction
 
 ## Quickstart
 
 ```bash
-# 1. Install the package and its deps (Python 3.10 recommended)
+# 1. Install the package and its deps (Python 3.10+ recommended)
 pip install -e .
 
 # 2. Install solvers
@@ -177,7 +196,7 @@ Output columns per method per network:
 - **Obj.Est**  — method's own loss estimate
 - **Obj.Eval** — NR-validated loss after plugging the method's dispatch into pandapower's Newton–Raphson power flow
 - **ΔV %**     — average **per-bus magnitude** deviation between method and NR
-- **Time**     — wall-clock seconds
+- **Time**     — sum of solver `model.optimize` calls (s); excludes Python model build
 - **Status**   — `ok`, `nr_fail`, `infeasible`, `not_conv`, `skip:*`
 
 ## Repository layout
